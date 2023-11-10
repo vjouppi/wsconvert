@@ -7,12 +7,20 @@ def specialchars(x):
     return {
         0x0D : 0,    # skip newline handling
         0x0A : 0,
+        0x8D : 0,
+        0x8A : 0,
         0x19 : 0x2A, #italic
+        0x99 : 0x2A, #italic end
         0x13 : 0x2A, #underline->italic
+        0x93 : 0x2A, #underline->italic end
         0x02 : 0x2A, #bold
+        0x82 : 0x2A, #bold end
         0x14 : 0x5E, #superscript
+        0x94 : 0x5E, #superscript end
         0x16 : 0x7E, #subscript
-        0x18 : 0x7E  #strikethrough
+        0x96 : 0x7E, #subscript end
+        0x18 : 0x7E, #strikethrough
+        0x98 : 0x7E  #strikethrough end
     }.get(x,0)
 
 def handleblock(block):
@@ -34,7 +42,12 @@ def handleblock(block):
 def converttext(data):
     counter=-1
     newline = False
-    linetype = 0
+
+    if data[0] == 0x2E: #begins with a dotline
+        linetype = 1
+    else:
+        linetype = 0
+
     outdata=bytearray()
     while counter<len(data)-1:
         counter+=1
@@ -43,7 +56,8 @@ def converttext(data):
             break
         # Extended character
         elif data[counter]==0x1B:
-            outdata.append(data[counter+1])
+            if linetype == 0: # we don't care about extended chars in dotlines
+                outdata.append(data[counter+1])
             counter += 2
         # Symmetrical sequence: 1Dh special character
         elif data[counter]==0x1D:
@@ -53,7 +67,9 @@ def converttext(data):
             counter += jump+2
         elif data[counter]<0x20:    # special formatting characters
             if data[counter] == 0x0D and not newline:
-                outdata += b'\x0D\x0A\x0D\x0A'
+                #outdata += b'\x0D\x0A\x0D\x0A'
+                if linetype == 0: # dotlines should be eaten, not blank
+                    outdata += b'\x0D\x0A'
                 newline = True
                 linetype = 0
             if not args.textmode:   # handle formatting for markdown
@@ -71,6 +87,20 @@ def converttext(data):
                 #    outdata.pop()
             if linetype != 1: # we are in a dotline => ignore it
                 outdata.append(data[counter])
+        elif specialchars(data[counter]):
+            if not args.textmode:
+                c=specialchars(data[counter])
+                if not c == 0:
+                    outdata.append(c)
+                if data[counter] == 0x82 or data[counter] == 0x98:
+                    outdata.append(c)   # duplicating some characters ** and ~~
+        elif data[counter]==0x9B: # sometimes extended characters are esc + 0x80
+            outdata.append(data[counter+1])
+            counter += 2
+        elif data[counter]==0x8D or data[counter]==0x8A:
+            pass
+        elif data[counter]>=0x80:   # kill 8th bit for ending characters
+            outdata.append(data[counter]-0x80)
     return outdata
 
 print("Basic WordStar to Markdown converter")
